@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 
+use crate::parser::Parser;
 use crate::lexer::tokenize;
 
 mod parser;
@@ -24,7 +25,10 @@ fn main() {
         }
     };
 
-    for token in tokens {
-        println!("{:?}", token);
-    }
+    let mut parser = Parser::new(&tokens);
+
+    match parser.parse_tokens() {
+        Ok(ex) => println!("{:?}", ex),
+        Err(e) => println!("{}", e)
+    };
 }

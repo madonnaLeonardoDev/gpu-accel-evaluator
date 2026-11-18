@@ -76,7 +76,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Tokens>, String> {
                 let mut has_dot = ch == '.';
                 while let Some(&c) = chars.peek() && (c.is_ascii_digit() || c == '.') {
                     if c == '.' && has_dot {
-                        return Err(format!("Unexpected `{}`",c ));
+                        return Err(format!("Unexpected `{}`",char ));
                     }
                     if c == '.' {
                         has_dot = true;
