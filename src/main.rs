@@ -1,35 +1,15 @@
-use std::io::{self, Write};
+use crate::tests::full_tests;
 
-use crate::parser::Parser;
-use crate::lexer::tokenize;
-
+mod tests;
+mod bytecode_constants;
 mod parser;
 mod lexer;
 mod bytecode;
 
 fn main() {
-    println!("Enter expression");
-
-    io::stdout().flush().unwrap();
-
-    let mut input = String::new();
-
-    io::stdin().read_line(&mut input).expect("Failed reading input");
-
-    let input = input.trim();
-
-    let tokens = match tokenize(input) {
-        Ok(t) => t,
-        Err(e) => {
-            println!("{}", e);
-            return;
-        }
-    };
-
-    let mut parser = Parser::new(&tokens);
-
-    match parser.parse_tokens() {
-        Ok(ex) => println!("{:?}", ex),
-        Err(e) => println!("{}", e)
-    };
+//RUNNING TESTS
+match full_tests(){
+    Ok(r) => println!("{:?}",r),
+    Err(e) => println!("{}", e)
+}
 }

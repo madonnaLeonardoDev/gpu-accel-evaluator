@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+
+use crate::{bytecode::ExecuteInstructions, parser::Parser};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tokens {
     Number(f32),
@@ -11,6 +15,19 @@ pub enum Tokens {
     Power,
     Identifier(String),
     Eof
+}
+pub trait CompileTokens {
+    fn compile(&self, vars_map: &HashMap<String, u32>) -> Result<Vec<u32>, String>;
+}
+
+
+impl CompileTokens for Vec<Tokens> {
+    fn compile(&self, vars_map: &HashMap<String, u32>) -> Result<Vec<u32>, String>{
+        let mut parser = Parser::new(self);
+        let expr = Parser::parse_tokens(&mut parser)?;
+        let opcode = expr.flatten(vars_map)?;
+        Ok(opcode.into_bytecode())
+    }
 }
 
 pub fn tokenize(input: &str) -> Result<Vec<Tokens>, String> {

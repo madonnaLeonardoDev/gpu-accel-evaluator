@@ -9,7 +9,6 @@ pub enum FunctionOperations {
     Tan(Box<Expression>),
     Ln(Box<Expression>),
     Log2(Box<Expression>),
-    Log(Box<Expression>),
     SquareRoot(Box<Expression>),
     Mod(Box<Expression>, Box<Expression>),
     SmoothMin(Box<Expression>, Box<Expression>, Box<Expression>),
@@ -166,9 +165,9 @@ impl<'a> Parser<'a> {
                     self.advance();
                     
                     let expected_args = match name.as_str() {
-                        "smin" | "smax" | "clamp" | "mix" => 3,
+                        "smoothmin" | "smoothmax" | "clamp" | "mix" => 3,
                         "mod" => 2,
-                        "abs" | "cos" | "sin" | "tan" | "ln" | "log2" | "log" | "sqrt" => 1,
+                        "abs" | "cos" | "sin" | "tan" | "ln" | "log2" | "sqrt" => 1,
                         _=> return Err(format!("Unkown function: '{}'", name))
                     };
 
@@ -202,12 +201,11 @@ impl<'a> Parser<'a> {
                     "tan" => FunctionOperations::Tan(Box::new(iter.next().unwrap())),
                     "ln" => FunctionOperations::Ln(Box::new(iter.next().unwrap())),
                     "log2" => FunctionOperations::Log2(Box::new(iter.next().unwrap())),
-                    "log" => FunctionOperations::Log(Box::new(iter.next().unwrap())),
                     "sqrt" => FunctionOperations::SquareRoot(Box::new(iter.next().unwrap())),
                     //Multi arg functions
                     "mod" => FunctionOperations::Mod(Box::new(iter.next().unwrap()), Box::new(iter.next().unwrap())),
-                    "smin" => FunctionOperations::SmoothMin(Box::new(iter.next().unwrap()), Box::new(iter.next().unwrap()), Box::new(iter.next().unwrap())),
-                    "smax" => FunctionOperations::SmoothMax(Box::new(iter.next().unwrap()), Box::new(iter.next().unwrap()), Box::new(iter.next().unwrap())),
+                    "smoothmin" => FunctionOperations::SmoothMin(Box::new(iter.next().unwrap()), Box::new(iter.next().unwrap()), Box::new(iter.next().unwrap())),
+                    "smoothmax" => FunctionOperations::SmoothMax(Box::new(iter.next().unwrap()), Box::new(iter.next().unwrap()), Box::new(iter.next().unwrap())),
                     "mix" => FunctionOperations::Mix(Box::new(iter.next().unwrap()), Box::new(iter.next().unwrap()), Box::new(iter.next().unwrap())),
                     "clamp" => FunctionOperations::Clamp(Box::new(iter.next().unwrap()), Box::new(iter.next().unwrap()), Box::new(iter.next().unwrap())),
                     _=> unreachable!()
