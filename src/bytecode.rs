@@ -210,11 +210,39 @@ impl ExecuteInstructions for Vec<OpCodes> {
     }
 }
 
+pub trait IndexingHashMap {
+    fn index_variables(&self) -> Result<Vec<f32>, String>;
+}
+
+impl IndexingHashMap for HashMap<String, u32> {
+    fn index_variables(&self) -> Result<Vec<f32>, String> {
+        if self.is_empty(){
+            return Ok(Vec::new());
+        }
+        let mut seen: HashSet<u32> = HashSet::new();
+        let mut i_sum: u64 = 0;
+        for (_, &i) in self {
+            if !seen.insert(i){
+                return Err(format!("Duplicate index: {}", i));
+            }
+            i_sum += i as u64;
+        }
+        let len = self.len() as u64;
+        if i_sum != len * (len - 1) /2 {
+            return Err("Non compact indexes".to_string())
+        }
+
+        let vars_vec = vec![0f32; self.len()];
+
+        Ok(vars_vec)
+    }
+}
+
 pub trait ExecuteBytecode {
-    fn cpu_execute(&self, vars: &[f32]) -> f32;
+    fn cpu_eval(&self, vars: &[f32]) -> f32;
 }
 impl ExecuteBytecode for Vec<u32> {
-    fn cpu_execute(&self, vars: &[f32]) -> f32 {
+    fn cpu_eval(&self, vars: &[f32]) -> f32 {
         let mut i: usize = 0;
         let mut stack: Vec<f32> = Vec::with_capacity(32);
 
@@ -327,30 +355,3 @@ impl ExecuteBytecode for Vec<u32> {
 }
 
 
-pub trait IndexingHashMap {
-    fn index_variables(&self) -> Result<Vec<f32>, String>;
-}
-
-impl IndexingHashMap for HashMap<String, u32> {
-    fn index_variables(&self) -> Result<Vec<f32>, String> {
-        if self.is_empty(){
-            return Ok(Vec::new());
-        }
-        let mut seen: HashSet<u32> = HashSet::new();
-        let mut i_sum: u64 = 0;
-        for (_, &i) in self {
-            if !seen.insert(i){
-                return Err(format!("Duplicate index: {}", i));
-            }
-            i_sum += i as u64;
-        }
-        let len = self.len() as u64;
-        if i_sum != len * (len - 1) /2 {
-            return Err("Non compact indexes".to_string())
-        }
-
-        let vars_vec = vec![0f32; self.len()];
-
-        Ok(vars_vec)
-    }
-}

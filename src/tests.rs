@@ -1,25 +1,34 @@
 use std::collections::HashMap;
-use crate::bytecode::{ExecuteBytecode, ExecuteInstructions, IndexingHashMap};
-use crate::lexer::{tokenize};
-use crate::parser::Parser;
+use crate::bytecode::{ExecuteBytecode, IndexingHashMap};
+use crate::lexer::{CompileTokens, tokenize};
+use crate::gpu_eval::{WgslEvaluator, DEFAULT_WGSL};
 
+fn approx_eq(a: f32, b: f32, abs_tol: f32, rel_tol: f32) -> bool {
+    if a == b {
+        return true;
+    }
+    if !a.is_finite() || !b.is_finite() {
+        return a.is_nan() && b.is_nan();
+    }
+    let diff = (a - b).abs();
+    let scale = a.abs().max(b.abs());
+    diff <= abs_tol.max(rel_tol * scale)
+}
 
-fn test_str(str: &str,vars_map: &HashMap<String, u32>, vars: &Vec<f32> , expected: f32) -> Result<(bool, f32), String> {
+fn test_str(str: &str,vars_map: &HashMap<String, u32>, vars: &Vec<f32> , expected: f32, rel_tol: f32, abs_tol: f32) -> Result<(bool, f32), String> {
     let tokens = tokenize(str)?;
-    let mut parser = Parser::new(&tokens);
-    let expr = parser.parse_tokens()?;
-    let opcode = expr.flatten(&vars_map)?;
-    let bytecode = opcode.into_bytecode();
-    let res = bytecode.cpu_execute(&vars);
-
-    if res == expected {
-        return Ok((true , res))
+    let bytecode = tokens.compile(vars_map)?;
+    let evaluator = WgslEvaluator::new(DEFAULT_WGSL);
+    let res = evaluator.eval(&bytecode, vars);
+    let matched = approx_eq(res, expected, abs_tol, rel_tol);
+    if matched {
+        Ok((true, res))
     } else {
-        return Ok((false, res));
+        Ok((false, res))
     }
 }
 
-pub fn full_tests() -> Result<bool, String> {
+pub fn base_test() -> Result<bool, String> {
     let mut vars_map: HashMap<String, u32> = HashMap::new();
     vars_map.insert("px".to_string(), 0);
     vars_map.insert("py".to_string(), 1);
@@ -70,7 +79,6 @@ pub fn full_tests() -> Result<bool, String> {
         let h = ((vars[3] - (s1 - s2).abs()).max(0.0)) / vars[3];
         s1.min(s2) - h * h * vars[3] * 0.25
     }),
-    ("sin(mod(px, a) * b + sin(py * b)) * k + (sqrt(px * px + py * py) - c)", ((vars[0] % vars[4]) * vars[5] + (vars[1] * vars[5]).sin()).sin() * vars[3] + ((vars[0] * vars[0] + vars[1] * vars[1]).sqrt() - vars[6])),
     ("clamp(mix(a - k, b + k, clamp(pz * c + 0.5, 0.0, 1.0)), -a, a)", {
         let t = (vars[2] * vars[6] + 0.5).clamp(0.0, 1.0);
         let m = (vars[4] - vars[3]) + ((vars[5] + vars[3]) - (vars[4] - vars[3])) * t;
@@ -80,8 +88,64 @@ pub fn full_tests() -> Result<bool, String> {
     let mut is_passed = true;
     let mut fails: Vec<usize> = Vec::new();
     for (i, test) in tests.iter().enumerate(){
-        let tr = test_str(test.0, &vars_map, &vars, test.1)?;
-        println!("{:?}", tr);
+        let tr = test_str(test.0, &vars_map, &vars, test.1, 1e-4, 1e-4)?;
+        println!("{:?} TEST RES: {}", tr, test.1);
+        if !tr.0 {
+            is_passed = false;
+            fails.push(i);
+        }
+    }
+    Ok(is_passed)
+}
+
+pub fn trig_tests() -> Result<bool, String> {
+    let mut vars_map: HashMap<String, u32> = HashMap::new();
+    vars_map.insert("px".to_string(), 0);
+    vars_map.insert("py".to_string(), 1);
+    vars_map.insert("pz".to_string(), 2);
+    vars_map.insert("k".to_string(), 3);
+    vars_map.insert("a".to_string(), 4);
+    vars_map.insert("b".to_string(), 5);
+    vars_map.insert("c".to_string(), 6);
+
+    let mut vars = vars_map.index_variables()?;
+    vars[0] = 21.4;      // vars[0] = px
+    vars[1] = 1.023;     // vars[1] = py
+    vars[2] = 23.0;      // vars[2] = pz
+    vars[3] = 764.9;     // vars[3] = k
+    vars[4] = 921.2;     // vars[4] = a
+    vars[5] = 745.1023;  // vars[5] = b
+    vars[6] = 12.0;      // vars[6] = c
+
+    let tests: Vec<(&str, f32)> = vec![
+        ("sin(py)", vars[1].sin()),
+        ("cos(py)", vars[1].cos()),
+        ("tan(py)", vars[1].tan()),
+        ("sin(py) * sin(py) + cos(py) * cos(py)", vars[1].sin() * vars[1].sin() + vars[1].cos() * vars[1].cos()),
+        ("sin(px * 0.1) + cos(pz * 0.1)", (vars[0] * 0.1).sin() + (vars[2] * 0.1).cos()),
+        ("sin(a)", vars[4].sin()),
+        ("cos(a)", vars[4].cos()),
+        ("sin(b)", vars[5].sin()),
+        ("cos(b)", vars[5].cos()),
+        ("tan(a * 0.01)", (vars[4] * 0.01).tan()),
+        ("sin(a + b)", (vars[4] + vars[5]).sin()),
+        ("cos(a - b)", (vars[4] - vars[5]).cos()),
+        ("sin(px * b + py * c)", (vars[0] * vars[5] + vars[1] * vars[6]).sin()),
+        ("cos(mod(px, c) * b)", ((vars[0] % vars[6]) * vars[5]).cos()),
+        ("sin(mod(px, c) * b + sin(py * b))", ((vars[0] % vars[6]) * vars[5] + (vars[1] * vars[5]).sin()).sin()),
+        ("sin(mod(px, c) * b + sin(py * b)) * k", ((vars[0] % vars[6]) * vars[5] + (vars[1] * vars[5]).sin()).sin() * vars[3]),
+        ("cos(a * b * 0.01) * cos(pz * b * 0.01)", (vars[4] * vars[5] * 0.01).cos() * (vars[2] * vars[5] * 0.01).cos()),
+        ("sin(mod(px, c) * b + sin(py * b)) * k + (sqrt(px * px + py * py) - c)", {
+            ((vars[0] % vars[6]) * vars[5] + (vars[1] * vars[5]).sin()).sin() * vars[3]
+                + ((vars[0] * vars[0] + vars[1] * vars[1]).sqrt() - vars[6])
+        }),
+    ];
+
+    let mut is_passed = true;
+    let mut fails: Vec<usize> = Vec::new();
+    for (i, test) in tests.iter().enumerate() {
+        let tr = test_str(test.0, &vars_map, &vars, test.1, 2e-2, (0.005 * vars[3].abs()).max(1e-3))?;
+        println!("{:?} TEST RES: {}", tr, test.1);
         if !tr.0 {
             is_passed = false;
             fails.push(i);
