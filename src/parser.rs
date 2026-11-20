@@ -1,7 +1,7 @@
 use crate::lexer::Tokens;
 
 #[derive(Debug)]
-enum FunctionOperations {
+pub enum FunctionOperations {
     Minus(Box<Expression>),
     Absolute(Box<Expression>),
     Cos(Box<Expression>),
@@ -19,7 +19,7 @@ enum FunctionOperations {
 }
 
 #[derive(Debug)]
-enum BinaryOperations {
+pub enum BinaryOperations {
     Add,
     Subtract,
     Multiply,

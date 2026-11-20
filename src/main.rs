@@ -5,6 +5,7 @@ use crate::lexer::tokenize;
 
 mod parser;
 mod lexer;
+mod bytecode;
 
 fn main() {
     println!("Enter expression");
