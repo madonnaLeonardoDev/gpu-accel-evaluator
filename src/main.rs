@@ -5,7 +5,13 @@ mod lexer;
 mod bytecode;
 use std::collections::HashMap;
 mod movement;
+mod wgsl_gen;
+mod test;
 
+
+use crate::parser::Parser;
+use crate::test::formulas;
+use crate::wgsl_gen::generate_shader;
 use crate::window_rendering::{Scene, run_window};
 use crate::bytecode::{IndexingHashMap};
 use crate::lexer::{CompileTokens, tokenize, Tokens};
@@ -38,19 +44,21 @@ fn main() {
     vars[3] = 0.0;
     vars[4] = 0.0;
 
-    let sphere = "sqrt((mod(x + 1.0, 2.0) - 1.0) * (mod(x + 1.0, 2.0) - 1.0) + y * y + (mod(z + 1.0, 2.0) - 1.0) * (mod(z + 1.0, 2.0) - 1.0)) - 0.5";
-
-
-    let tokens: Vec<Tokens> = exec_res(tokenize(sphere));
-    let bytecode = exec_res(tokens.compile(&vars_map));
+    let test_shapes = formulas()[14];
+    
+    let expr = {
+        let tokens = exec_res(tokenize(test_shapes));
+        let mut parser = Parser::new(&tokens);
+        exec_res(parser.parse_tokens())
+    };
+    let shader_src = exec_res(generate_shader(&expr, &vars_map));
 
     let scene = Scene{
-        bytecode,
         camera: camera,
-        vars: vars
+        vars: vars,
     };
 
-    run_window(&scene);
+    run_window(&scene, &shader_src);
 }
 fn exec_res<R>(res: Result<R, String>) -> R {
     match res {

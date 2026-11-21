@@ -8,7 +8,7 @@ use winit::{
 };
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use crate::movement::*;
+use crate::{movement::*};
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -22,7 +22,6 @@ struct Uniforms {
 pub struct Scene {
     pub vars: Vec<f32>,
     pub camera: Vec<f32>,
-    pub bytecode: Vec<u32>,
 }
 
 struct State {
@@ -35,16 +34,14 @@ struct State {
     uniform_buffer: wgpu::Buffer,
     vars_buffer: wgpu::Buffer,
     camera_buffer: wgpu::Buffer,
-    bytecode_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     vars: Vec<f32>,
     camera: Vec<f32>,
-    bytecode: Vec<u32>,
     start_time: Instant,
 }
 
 impl State {
-    async fn new(window: Arc<Window>, scene: Scene) -> Self {
+    async fn new(window: Arc<Window>, scene: Scene, src_shader: &str) -> Self {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let surface = instance.create_surface(window.clone()).unwrap();
@@ -116,13 +113,6 @@ impl State {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
-        let bc_slice: &[u32] = if scene.bytecode.is_empty() { &[0] } else { &scene.bytecode };
-        let bytecode_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Bytecode"),
-            contents: bytemuck::cast_slice(bc_slice),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
-
         let storage_read_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -134,24 +124,23 @@ impl State {
             count: None,
         };
 
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                storage_read_entry(1), // bytecode
-                storage_read_entry(2), // vars
-                storage_read_entry(3), // camera
-            ],
-        });
+let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+    label: None,
+    entries: &[
+        wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        },
+        storage_read_entry(1), // vars
+        storage_read_entry(2), // camera
+    ],
+});
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
@@ -163,20 +152,19 @@ impl State {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: bytecode_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
                     resource: vars_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding: 2,
                     resource: camera_buffer.as_entire_binding(),
                 },
             ],
         });
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("sdf shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(src_shader)),
+        });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
@@ -220,11 +208,9 @@ impl State {
             uniform_buffer,
             vars_buffer,
             camera_buffer,
-            bytecode_buffer,
             bind_group,
             vars: scene.vars,
             camera: scene.camera,
-            bytecode: scene.bytecode,
             start_time: Instant::now(),
         }
     }
@@ -241,11 +227,6 @@ impl State {
             .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(slice));
     }
 
-    fn push_bytecode(&self) {
-        let slice: &[u32] = if self.bytecode.is_empty() { &[0] } else { &self.bytecode };
-        self.queue
-            .write_buffer(&self.bytecode_buffer, 0, bytemuck::cast_slice(slice));
-    }
 
     /// Syncs a `Scene` snapshot into `State` and uploads changed buffers to the GPU.
     /// Call this every frame once your event/async source produces a `Scene`.
@@ -314,14 +295,15 @@ impl State {
     }
 }
 
-struct App {
+struct App<'a> {
     state: Option<State>,
     scene: Scene,
+    shader_src: &'a str,
     fps_frames: u32,
     fps_last: Instant,
 }
 
-impl ApplicationHandler for App {
+impl<'a> ApplicationHandler for App<'a> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         // unchanged
         if self.state.is_none() {
@@ -331,7 +313,7 @@ impl ApplicationHandler for App {
                     .unwrap(),
             );
             let scene = std::mem::take(&mut self.scene);
-            self.state = Some(pollster::block_on(State::new(window, scene)));
+            self.state = Some(pollster::block_on(State::new(window, scene, self.shader_src)));
         }
     }
 
@@ -364,38 +346,49 @@ impl ApplicationHandler for App {
                     },
                 ..
             } => {
+                let now = Instant::now();
+                let dt = now.duration_since(self.fps_last).as_secs_f32().min(0.1);
+                let speed = 0.5;
                 let pressed = key_state == ElementState::Pressed;
                 match code {
                     KeyCode::KeyW => {
-                        state.camera.move_forward(3.0, 0.016);
+                        state.camera.move_forward(speed, dt);
                         state.push_camera();
                     },
                     KeyCode::KeyS => {
-                        state.camera.move_backward(3.0, 0.016);
+                        state.camera.move_backward(speed, dt);
                         state.push_camera();
                     }
                     KeyCode::KeyA => {
-                        state.camera.move_left(3.0, 0.016);
+                        state.camera.move_left(speed, dt);
                         state.push_camera();
                     }
                     KeyCode::KeyD => {
-                        state.camera.move_right(3.0, 0.016);
+                        state.camera.move_right(speed, dt);
                         state.push_camera();
                     }
                     KeyCode::ArrowLeft => {
-                        state.camera.turn_left(1.8, 0.016);
+                        state.camera.turn_left(speed, dt);
                         state.push_camera();
                     }
                     KeyCode::ArrowRight => {
-                        state.camera.turn_right(1.8, 0.016);
+                        state.camera.turn_right(speed, dt);
                         state.push_camera();
                     }
                     KeyCode::ArrowUp => {
-                        state.camera.look_up(1.8, 0.016);
+                        state.camera.look_up(speed, dt);
                         state.push_camera();
                     }
                     KeyCode::ArrowDown => {
-                        state.camera.look_down(1.8, 0.016);
+                        state.camera.look_down(speed, dt);
+                        state.push_camera();
+                    },
+                    KeyCode::Space => {
+                        state.camera.move_up(speed, dt);
+                        state.push_camera();
+                    },
+                    KeyCode::ShiftLeft => {
+                        state.camera.move_down(speed, dt);
                         state.push_camera();
                     }
                     KeyCode::Escape if pressed && !repeat => event_loop.exit(),
@@ -408,13 +401,14 @@ impl ApplicationHandler for App {
     }
 }
 
-pub fn run_window(scene: &Scene) {
+pub fn run_window(scene: &Scene, shader_src: &str) {
     let event_loop = EventLoop::new().unwrap();
     let mut app = App {
         state: None,
         scene: scene.clone(),
         fps_frames: 0,
-        fps_last: Instant::now()
+        fps_last: Instant::now(),
+        shader_src: shader_src
     };
     event_loop.run_app(&mut app).unwrap();
 }

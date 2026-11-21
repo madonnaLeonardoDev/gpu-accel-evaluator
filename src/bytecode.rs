@@ -64,6 +64,16 @@ impl OpCodes {
     }
 }
 
+    fn format_wgsl_f32(n: f32) -> String {
+        // Handle -0.0 cleanly and force a decimal point for whole numbers
+        let clean = if n == 0.0 { 0.0 } else { n };
+        if clean.fract() == 0.0 {
+            format!("{clean:.1}") // e.g. 2.0 -> "2.0", -1.0 -> "-1.0"
+        } else {
+            format!("{clean}")
+        }
+    }
+
 impl Expression {
     fn node_count(&self) -> usize {
         match self {
@@ -92,6 +102,72 @@ impl Expression {
             } 
         }
     }
+    pub fn map_wgsl_math(&self, vars_map: &HashMap<String, u32>) -> Result<String, String> {
+    match self {
+        Expression::Number(n) => Ok(format_wgsl_f32(*n)),
+        Expression::Variable(s) => match s.as_str() {
+            "x" => Ok("p.x".to_string()),
+            "y" => Ok("p.y".to_string()),
+            "z" => Ok("p.z".to_string()),
+            val => {
+                let idx = vars_map
+                    .get(val)
+                    .ok_or_else(|| format!("No variable found called: {}", val))?;
+                Ok(format!("vars[{}]", idx))
+            }
+        },
+        Expression::Binary { left, operator, right } => {
+            let l = left.map_wgsl_math(vars_map)?;
+            let r = right.map_wgsl_math(vars_map)?;
+            match operator {
+                BinaryOperations::Add => Ok(format!("({} + {})", l, r)),
+                BinaryOperations::Subtract => Ok(format!("({} - {})", l, r)),
+                BinaryOperations::Multiply => Ok(format!("({} * {})", l, r)),
+                BinaryOperations::Divide => Ok(format!("({} / {})", l, r)),
+                BinaryOperations::Power => Ok(format!("pow({}, {})", l, r)),
+            }
+        }
+        Expression::Function(f) => match f {
+            FunctionOperations::Minus(a) => Ok(format!("(-({}))", a.map_wgsl_math(vars_map)?)),
+            FunctionOperations::Absolute(a) => Ok(format!("abs({})", a.map_wgsl_math(vars_map)?)),
+            FunctionOperations::Cos(a) => Ok(format!("cos({})", a.map_wgsl_math(vars_map)?)),
+            FunctionOperations::Sin(a) => Ok(format!("sin({})", a.map_wgsl_math(vars_map)?)),
+            FunctionOperations::Tan(a) => Ok(format!("tan({})", a.map_wgsl_math(vars_map)?)),
+            FunctionOperations::Ln(a) => Ok(format!("log({})", a.map_wgsl_math(vars_map)?)),
+            FunctionOperations::Log2(a) => Ok(format!("log2({})", a.map_wgsl_math(vars_map)?)),
+            FunctionOperations::SquareRoot(a) => Ok(format!("sqrt({})", a.map_wgsl_math(vars_map)?)),
+            FunctionOperations::Mod(a, b) => {
+                Ok(format!("fmod({}, {})", a.map_wgsl_math(vars_map)?, b.map_wgsl_math(vars_map)?))
+            }
+            FunctionOperations::SmoothMin(a, b, c) => Ok(format!(
+                "smin({}, {}, {})",
+                a.map_wgsl_math(vars_map)?,
+                b.map_wgsl_math(vars_map)?,
+                c.map_wgsl_math(vars_map)?
+            )),
+            FunctionOperations::SmoothMax(a, b, c) => Ok(format!(
+                "smax({}, {}, {})",
+                a.map_wgsl_math(vars_map)?,
+                b.map_wgsl_math(vars_map)?,
+                c.map_wgsl_math(vars_map)?
+            )),
+            FunctionOperations::Mix(a, b, c) => Ok(format!(
+                "mix({}, {}, {})",
+                a.map_wgsl_math(vars_map)?,
+                b.map_wgsl_math(vars_map)?,
+                c.map_wgsl_math(vars_map)?
+            )),
+            FunctionOperations::Clamp(a, b, c) => Ok(format!(
+                "clamp({}, {}, {})",
+                a.map_wgsl_math(vars_map)?,
+                b.map_wgsl_math(vars_map)?,
+                c.map_wgsl_math(vars_map)?
+            )),
+        },
+    }
+}
+
+
     fn push_opcode(self, variables: &HashMap<String, u32>, out: &mut Vec<OpCodes>) -> Result<(), String>{
         match self {
             Self::Number(n) => Ok(out.push(OpCodes::Num(n))),
@@ -237,121 +313,4 @@ impl IndexingHashMap for HashMap<String, u32> {
         Ok(vars_vec)
     }
 }
-
-pub trait ExecuteBytecode {
-    fn cpu_eval(&self, vars: &[f32]) -> f32;
-}
-impl ExecuteBytecode for Vec<u32> {
-    fn cpu_eval(&self, vars: &[f32]) -> f32 {
-        let mut i: usize = 0;
-        let mut stack: Vec<f32> = Vec::with_capacity(32);
-
-        while i < self.len() {
-            match self[i] {
-                NUM => {
-                    i+=1;
-                    stack.push(f32::from_bits(self[i]));
-                }
-                VAR => {
-                    i+=1;
-                    stack.push(vars[self[i] as usize]);
-                }
-                MINUS => {
-                    let num= stack.pop().expect("Expected f32");
-                    stack.push(num * -1.0);
-                }
-                ABSOLUTE => {
-                    let num = stack.pop().expect("Expected f32");
-                    stack.push(num.abs());
-                }
-                COS => {
-                    let num = stack.pop().expect("Expected f32");
-                    stack.push(num.cos());
-                }
-                SIN => {
-                    let num = stack.pop().expect("Expected f32");
-                    stack.push(num.sin());
-                }
-                TAN => {
-                    let num = stack.pop().expect("Expected f32");
-                    stack.push(num.tan());
-                }
-                LN => {
-                    let num = stack.pop().expect("Expected f32");
-                    stack.push(num.ln());
-                }
-                LOG2 => {
-                    let num = stack.pop().expect("Expected f32");
-                    stack.push(num.log2());
-                }
-                SQUAREROOT => {
-                    let num = stack.pop().expect("Expected f32");
-                    stack.push(num.sqrt());
-                }
-                ADD => {
-                    let right = stack.pop().expect("Expected f32");
-                    let left = stack.pop().expect("Expected f32");
-                    stack.push(left + right);
-                }
-                SUBTRACT => {
-                    let right = stack.pop().expect("Expected f32");
-                    let left = stack.pop().expect("Expected f32");
-                    stack.push(left - right);
-                }
-                MULTIPLY => {
-                    let right = stack.pop().expect("Expected f32");
-                    let left = stack.pop().expect("Expected f32");
-                    stack.push(left * right);
-                }
-                DIVIDE => {
-                    let right = stack.pop().expect("Expected f32");
-                    let left = stack.pop().expect("Expected f32");
-                    stack.push(left / right);
-                }
-                POWER => {
-                    let right = stack.pop().expect("Expected f32");
-                    let left = stack.pop().expect("Expected f32");
-                    stack.push(left.powf(right));
-                }
-                MOD => {
-                    let right = stack.pop().expect("Expected f32");
-                    let left = stack.pop().expect("Expected f32");
-                    stack.push(left % right);
-                }
-                SMOOTHMIN=> {
-                    let k = stack.pop().expect("Expected f32");
-                    let b = stack.pop().expect("Expected f32");
-                    let a = stack.pop().expect("Expected f32");
-                    let h = ((k - (a - b).abs()).max(0.0)) / k;
-                    stack.push(a.min(b) - h * h * k * 0.25);
-                }
-                SMOOTHMAX => {
-                    let k = stack.pop().expect("Expected f32");
-                    let b = stack.pop().expect("Expected f32");
-                    let a = stack.pop().expect("Expected f32");
-                    let h = ((k - (a - b).abs()).max(0.0)) / k;
-                    stack.push(a.max(b) + h * h * k * 0.25);
-                }
-                MIX => {
-                    let t = stack.pop().expect("Expected f32");
-                    let y = stack.pop().expect("Expected f32");
-                    let x = stack.pop().expect("Expected f32");
-                    stack.push(x + (y - x) * t);
-                }
-                CLAMP => {
-                    let max_val = stack.pop().expect("Expected f32");
-                    let min_val = stack.pop().expect("Expected f32");
-                    let x = stack.pop().expect("Expected f32");
-                    stack.push(x.clamp(min_val, max_val));
-                }
-                _=> panic!()
-            }
-            i += 1;
-        }
-
-
-        *stack.last().expect("Expected result on stack")
-    }
-}
-
 
