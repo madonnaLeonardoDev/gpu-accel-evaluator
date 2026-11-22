@@ -8,7 +8,6 @@ struct Uniforms {
 @group(0) @binding(1) var<storage, read> vars: array<f32>;
 @group(0) @binding(2) var<storage, read> camera: array<f32>;
 
-// --- Render settings (were uniforms in the other version) ---
 const MAX_STEPS: i32 = 100;
 const STEP_SCALE: f32 = 0.7;
 const MAX_DIST: f32 = 100.0;
@@ -63,7 +62,9 @@ fn smax(a: f32, b: f32, k_raw: f32) -> f32 {
     return mix(a, b, h) + k * h * (1.0 - h);
 }
 
-// {{EVAL_SDF}}
+fn eval_sdf(p: vec3<f32>) -> f32 {
+return //{WGSL EXPRESSION};
+}
 
 fn sdf_scene(p: vec3<f32>) -> f32 {
     return eval_sdf(p);

@@ -1,4 +1,4 @@
-use crate::lexer::Tokens;
+use super::lexer::ExprTokens;
 
 #[derive(Debug)]
 pub enum FunctionOperations {
@@ -42,12 +42,12 @@ pub enum Expression {
 }
 
 pub struct Parser<'a>{
-    tokens: &'a [Tokens],
+    tokens: &'a [ExprTokens],
     pointer: usize
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(tokens: &'a [Tokens]) -> Self {
+    pub fn new(tokens: &'a [ExprTokens]) -> Self {
         Self {
             pointer: 0,
             tokens
@@ -57,21 +57,21 @@ impl<'a> Parser<'a> {
     pub fn parse_tokens(&mut self) -> Result<Expression, String> {
         let expr = self.parse_additive()?;
 
-        if !matches!(self.peek(), Tokens::Eof) {
+        if !matches!(self.peek(), ExprTokens::Eof) {
             return Err(format!("Unexpected token remaining at index {}", self.pointer))
         }
 
         Ok(expr)
     }
 
-    fn peek(&mut self) -> &Tokens {
-        self.tokens.get(self.pointer).unwrap_or(&Tokens::Eof)
+    fn peek(&mut self) -> &ExprTokens {
+        self.tokens.get(self.pointer).unwrap_or(&ExprTokens::Eof)
     }
 
-    fn advance(&mut self) -> &Tokens {
-        let tok = self.tokens.get(self.pointer).unwrap_or(&Tokens::Eof);
+    fn advance(&mut self) -> &ExprTokens {
+        let tok = self.tokens.get(self.pointer).unwrap_or(&ExprTokens::Eof);
         
-        if *tok != Tokens::Eof {
+        if *tok != ExprTokens::Eof {
             self.pointer += 1;
         }
         tok
@@ -80,10 +80,10 @@ impl<'a> Parser<'a> {
     fn parse_additive(&mut self) -> Result<Expression, String> {
         let mut left = self.parse_multiplication()?;
 
-        while matches!(self.peek(), Tokens::Plus | Tokens::Minus ) {
+        while matches!(self.peek(), ExprTokens::Plus | ExprTokens::Minus ) {
             let op = match self.advance() {
-                Tokens::Plus => BinaryOperations::Add,
-                Tokens::Minus => BinaryOperations::Subtract,
+                ExprTokens::Plus => BinaryOperations::Add,
+                ExprTokens::Minus => BinaryOperations::Subtract,
                 _ => unreachable!()
             };
 
@@ -98,10 +98,10 @@ impl<'a> Parser<'a> {
     fn parse_multiplication(&mut self)-> Result<Expression, String> {
         let mut left = self.parse_power()?;
 
-        while matches!(self.peek(), Tokens::Times | Tokens::Divide) {
+        while matches!(self.peek(), ExprTokens::Times | ExprTokens::Divide) {
             let op = match self.advance() {
-                Tokens::Times => BinaryOperations::Multiply,
-                Tokens::Divide => BinaryOperations::Divide,
+                ExprTokens::Times => BinaryOperations::Multiply,
+                ExprTokens::Divide => BinaryOperations::Divide,
                 _=> unreachable!()
             };
 
@@ -116,7 +116,7 @@ impl<'a> Parser<'a> {
     fn parse_power(&mut self)-> Result<Expression, String> {
         let mut left = self.parse_unary()?;
 
-        while matches!(self.peek(), Tokens::Power){
+        while matches!(self.peek(), ExprTokens::Power){
             self.advance();
             let op = BinaryOperations::Power;
 
@@ -129,7 +129,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_unary(&mut self)-> Result<Expression, String> {
-        if matches!(self.peek(), Tokens::Minus){
+        if matches!(self.peek(), ExprTokens::Minus){
             self.advance();
 
             let expr = self.parse_unary()?;
@@ -144,13 +144,13 @@ impl<'a> Parser<'a> {
 
     fn parse_primary(&mut self) -> Result<Expression, String> {
         match self.advance() {
-            Tokens::Number(n) => {
+            ExprTokens::Number(n) => {
                 return Ok(Expression::Number(*n))
             },
-            Tokens::OpenPar => {
+            ExprTokens::OpenPar => {
                 let expr = self.parse_additive()?;
 
-                if !matches!(self.peek(), Tokens::ClosedPar) {
+                if !matches!(self.peek(), ExprTokens::ClosedPar) {
                     return Err("Expected ')'".to_string())
                 }
 
@@ -158,10 +158,10 @@ impl<'a> Parser<'a> {
 
                 return Ok(expr)
             },
-            Tokens::Identifier(name ) => {
+            ExprTokens::Identifier(name ) => {
                 let name = name.clone();
 
-                if matches!(self.peek(), Tokens::OpenPar) {
+                if matches!(self.peek(), ExprTokens::OpenPar) {
                     self.advance();
                     
                     let expected_args = match name.as_str() {
@@ -173,16 +173,16 @@ impl<'a> Parser<'a> {
 
                     let mut args: Vec<Expression> = Vec::with_capacity(expected_args);
 
-                    if !matches!(self.peek(), Tokens::ClosedPar) {
+                    if !matches!(self.peek(), ExprTokens::ClosedPar) {
                         args.push(self.parse_additive()?);
 
-                        while matches!(self.peek(), Tokens::Comma){
+                        while matches!(self.peek(), ExprTokens::Comma){
                             self.advance();
                             args.push(self.parse_additive()?);
                         }
                     }
 
-                    if !matches!(self.peek(), Tokens::ClosedPar) {
+                    if !matches!(self.peek(), ExprTokens::ClosedPar) {
                         return Err("Expected ')'".to_string());
                     }
 

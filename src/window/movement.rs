@@ -6,7 +6,6 @@ const CAM_PITCH: usize = 4;
 
 const MAX_PITCH: f32 = std::f32::consts::FRAC_PI_2 - 0.01;
 
-use crate::Scene;
 pub trait Movement {
     fn forward_xz(&self) -> (f32, f32);
 
