@@ -14,11 +14,11 @@ fn format_wgsl_f32(n: f32) -> String {
     }
 }
 pub trait GenerateShader{
-    fn generate_shader(&self, vars_map:&HashMap<String, u32>) -> Result<String, String>;
+    fn generate_shader(&self, vars_map:&HashMap<String, f32>) -> Result<String, String>;
 }
 
 impl GenerateShader for Vec<Expression> {
-    fn generate_shader(&self, vars_map:&HashMap<String, u32>) -> Result<String, String> {
+    fn generate_shader(&self, vars_map:&HashMap<String, f32>) -> Result<String, String> {
         if self.is_empty() {
             return Err("Empty Expression vec".to_string());
         }
@@ -48,7 +48,7 @@ impl GenerateShader for Vec<Expression> {
 
 
 impl Expression {
-    pub fn map_wgsl_math(&self, vars_map: &HashMap<String, u32>) -> Result<String, String> {
+    pub fn map_wgsl_math(&self, vars_map: &HashMap<String, f32>) -> Result<String, String> {
     match self {
         Expression::Number(n) => Ok(format_wgsl_f32(*n)),
         Expression::Variable(s) => match s.as_str() {
@@ -56,10 +56,10 @@ impl Expression {
             "y" => Ok("p.y".to_string()),
             "z" => Ok("p.z".to_string()),
             val => {
-                let idx = vars_map
+                let val = vars_map
                     .get(val)
                     .ok_or_else(|| format!("No variable found called: {}", val))?;
-                Ok(format!("vars[{}]", idx))
+                Ok(format_wgsl_f32(*val))
             }
         },
         Expression::Binary { left, operator, right } => {
@@ -142,12 +142,12 @@ impl IndexingHashMap for HashMap<String, u32> {
 }
 
 pub trait CompileString {
-    fn compile_wgsl(&self, vars_map: &HashMap<String, u32>) -> Result<String, String>;
+    fn compile_wgsl(&self, vars_map: &HashMap<String, f32>) -> Result<String, String>;
 }
 
 
 impl CompileString for Vec<&str>{
-    fn compile_wgsl(&self, vars_map: &HashMap<String, u32>) -> Result<String, String>{
+    fn compile_wgsl(&self, vars_map: &HashMap<String, f32>) -> Result<String, String>{
         let mut exprs: Vec<Expression> = Vec::new();
         
         for str in self {

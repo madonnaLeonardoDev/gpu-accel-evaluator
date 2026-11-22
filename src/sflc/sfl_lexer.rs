@@ -1,5 +1,5 @@
 #[derive(PartialEq, Debug)]
-pub enum SflTokens {
+pub enum SdflTokens {
     Num(f32),
     MathPlus,
     MathMinus,
@@ -13,12 +13,14 @@ pub enum SflTokens {
     ClosedPar,
     OpenCurly,
     ClosedCurly,
+    OpenBracket,
+    ClosedBracket,
     Identifier(String),
     Eof
 }
-pub fn tokenize_sfl(input: &str) -> Result<Vec<SflTokens>, String> {
+pub fn tokenize_sfl(input: &str) -> Result<Vec<SdflTokens>, String> {
     let mut chars = input.chars().peekable();
-    let mut tokens: Vec<SflTokens> = Vec::new();
+    let mut tokens: Vec<SdflTokens> = Vec::new();
 
     while let Some(&char) = chars.peek() {
         if char.is_ascii_whitespace() {
@@ -28,51 +30,59 @@ pub fn tokenize_sfl(input: &str) -> Result<Vec<SflTokens>, String> {
         
         match char {
             '=' => {
-                tokens.push(SflTokens::Equals);
+                tokens.push(SdflTokens::Equals);
                 chars.next();
             },
             '+' => {
-                tokens.push(SflTokens::MathPlus);
+                tokens.push(SdflTokens::MathPlus);
                 chars.next();
             },
             '-' => {
-                tokens.push(SflTokens::MathMinus);
+                tokens.push(SdflTokens::MathMinus);
                 chars.next();
             },
             '*' => {
-                tokens.push(SflTokens::MathTimes);
+                tokens.push(SdflTokens::MathTimes);
                 chars.next();
             },
             '/' => {
-                tokens.push(SflTokens::MathDivide);
+                tokens.push(SdflTokens::MathDivide);
                 chars.next();
             },
             '^' => {
-                tokens.push(SflTokens::MathPow);
+                tokens.push(SdflTokens::MathPow);
                 chars.next();
             },
             ',' => {
-                tokens.push(SflTokens::Comma);
+                tokens.push(SdflTokens::Comma);
                 chars.next();
             },
             ';' => {
-                tokens.push(SflTokens::SemiColon);
+                tokens.push(SdflTokens::SemiColon);
                 chars.next();
             },
             '(' => {
-                tokens.push(SflTokens::OpenPar);
+                tokens.push(SdflTokens::OpenPar);
                 chars.next();
             },
             ')' => {
-                tokens.push(SflTokens::ClosedPar);
+                tokens.push(SdflTokens::ClosedPar);
                 chars.next();
             },
             '{' => {
-                tokens.push(SflTokens::OpenCurly);
+                tokens.push(SdflTokens::OpenCurly);
                 chars.next();
             },
             '}' => {
-                tokens.push(SflTokens::ClosedCurly);
+                tokens.push(SdflTokens::ClosedCurly);
+                chars.next();
+            },
+            '[' => {
+                tokens.push(SdflTokens::OpenBracket);
+                chars.next();
+            },
+            ']' => {
+                tokens.push(SdflTokens::ClosedBracket);
                 chars.next();
             },
             ch if ch.is_ascii_alphabetic() => {
@@ -83,7 +93,7 @@ pub fn tokenize_sfl(input: &str) -> Result<Vec<SflTokens>, String> {
                     str.push(c);
                     chars.next();
                 }
-                tokens.push(SflTokens::Identifier(str));
+                tokens.push(SdflTokens::Identifier(str));
             },
             ch if ch.is_ascii_digit() || ch == '.' => {
                 let mut str = String::new();
@@ -102,14 +112,14 @@ pub fn tokenize_sfl(input: &str) -> Result<Vec<SflTokens>, String> {
                     chars.next();
                 }
                 let num = str.parse::<f32>().map_err(|_| "Failed parsing number")?;
-                tokens.push(SflTokens::Num(num));
+                tokens.push(SdflTokens::Num(num));
             },
             _=> return Err(format!("Unexpected `{}`", char))
         }
 
     }
 
-    tokens.push(SflTokens::Eof);
+    tokens.push(SdflTokens::Eof);
 
     Ok(tokens)
 }

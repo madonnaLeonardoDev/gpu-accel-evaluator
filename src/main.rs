@@ -8,7 +8,7 @@ use crate::{sflc::sfl_lexer::tokenize_sfl, shader_compiling::wgsl_compile::Compi
 use crate::test::formulas;
 use window::window_rendering::{Scene, run_window};
 use shader_compiling::wgsl_compile::{IndexingHashMap};
-use sflc::sfl_parser::SflParser;
+use sflc::sfl_parser::SdflParser;
 
 fn main() {
     /*let mut camera_vars_map: HashMap<String, u32> = HashMap::new();
@@ -40,11 +40,11 @@ fn main() {
     let scene = Scene { vars, camera };
     run_window(&scene, &shader_src); */
     println!("Start");
-    let input = "(x, y, z){ x + y * sin(3 -z^2)";
+    let input = "carota = 2 + 1;";
     let tok = exec_res(tokenize_sfl(input));
     println!("{:?}", tok);
-    let mut parser = SflParser::new(tok);
-    let res = exec_res(parser.parse_shape());
+    let mut parser = SdflParser::new(tok);
+    let res = exec_res(parser.parse_var());
     println!("{:?}", res);
 }
 fn exec_res<R>(res: Result<R, String>) -> R {
