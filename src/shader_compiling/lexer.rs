@@ -1,9 +1,6 @@
-use std::collections::HashMap;
-
-use crate::{bytecode::ExecuteInstructions, parser::Parser};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Tokens {
+pub enum ExprTokens {
     Number(f32),
     OpenPar,
     ClosedPar,
@@ -16,23 +13,10 @@ pub enum Tokens {
     Identifier(String),
     Eof
 }
-pub trait CompileTokens {
-    fn compile(&self, vars_map: &HashMap<String, u32>) -> Result<Vec<u32>, String>;
-}
 
-
-impl CompileTokens for Vec<Tokens> {
-    fn compile(&self, vars_map: &HashMap<String, u32>) -> Result<Vec<u32>, String>{
-        let mut parser = Parser::new(self);
-        let expr = Parser::parse_tokens(&mut parser)?;
-        let opcode = expr.flatten(vars_map)?;
-        Ok(opcode.into_bytecode())
-    }
-}
-
-pub fn tokenize(input: &str) -> Result<Vec<Tokens>, String> {
+pub fn tokenize_expr(input: &str) -> Result<Vec<ExprTokens>, String> {
     let mut chars = input.chars().peekable();
-    let mut tokens: Vec<Tokens> = Vec::new();
+    let mut tokens: Vec<ExprTokens> = Vec::new();
 
     while let Some(&char) = chars.peek() {
 
@@ -43,36 +27,36 @@ pub fn tokenize(input: &str) -> Result<Vec<Tokens>, String> {
 
         match char {
             '+' => {
-                tokens.push(Tokens::Plus);
+                tokens.push(ExprTokens::Plus);
                 chars.next();
             },
             '-' => {
-                tokens.push(Tokens::Minus);
+                tokens.push(ExprTokens::Minus);
                 chars.next();
             }
             '*' => {
-                tokens.push(Tokens::Times);
+                tokens.push(ExprTokens::Times);
                 chars.next();
             }
             '/' => {
-                tokens.push(Tokens::Divide);
+                tokens.push(ExprTokens::Divide);
                 chars.next();
             }
             '^' => {
-                tokens.push(Tokens::Power);
+                tokens.push(ExprTokens::Power);
                 chars.next();
             }
             ',' => {
-                tokens.push(Tokens::Comma);
+                tokens.push(ExprTokens::Comma);
                 chars.next();
             }
             '(' => {
-                tokens.push(Tokens::OpenPar);
+                tokens.push(ExprTokens::OpenPar);
                 chars.next();
                 
             }
             ')' => {
-                tokens.push(Tokens::ClosedPar);
+                tokens.push(ExprTokens::ClosedPar);
                 chars.next();
             },
             ch if ch.is_ascii_alphabetic() => {
@@ -83,7 +67,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Tokens>, String> {
                     str.push(c);
                     chars.next();
                 }
-                tokens.push(Tokens::Identifier(str));
+                tokens.push(ExprTokens::Identifier(str));
             },
             ch if ch.is_ascii_digit() || ch == '.' => {
                 let mut str = String::new();
@@ -102,7 +86,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Tokens>, String> {
                     chars.next();
                 }
                 let num = str.parse::<f32>().map_err(|_| "Failed parsing number")?;
-                tokens.push(Tokens::Number(num));
+                tokens.push(ExprTokens::Number(num));
             }
             _=> {
                 return Err(format!("Unexpected `{}`",char ));
@@ -110,7 +94,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Tokens>, String> {
         }
     }
 
-    tokens.push(Tokens::Eof);
+    tokens.push(ExprTokens::Eof);
 
     Ok(tokens)
 }
