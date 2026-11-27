@@ -166,7 +166,8 @@ impl SdflParser {
             SdflTokens::Identifier(name) => {
                 let name = name.clone();
 
-                if matches!(self.peek(), SdflTokens::OpenPar) {
+                if matches!(self.peek(), SdflTokens::OpenPar) && !context.shapes.contains_key(&name)
+                {
                     self.advance();
 
                     let expected_args = match name.as_str() {
@@ -242,7 +243,7 @@ impl SdflParser {
 
                     Ok(Expression::Function(op))
                 } else {
-                    Ok(self.parse_identif(context, &name)?)
+                    Ok(self.parse_identif(context, vars, &name)?)
                 }
             }
             _ => Err(format!("Unexpected token on index: {}", self.pointer)),
@@ -270,22 +271,22 @@ impl SdflParser {
     }
 
     pub fn wgsl_parse(&mut self) -> Result<String, String> {
-        let context = Context::new();
-        while self.advance() != &SdflTokens::Identifier("scene".to_string()) {
+        let mut context = Context::new();
+        while self.peek() != &SdflTokens::Identifier("scene".to_string()) {
             if let Identifier(id) = self.advance() {
                 match id.as_str() {
                     "const" => {
-                        self.parse_const(&mut context);
+                        self.parse_const(&mut context)?;
                     }
                     "shape" => {
-                        self.parse_shape_fn(&mut context);
+                        self.parse_shape_fn(&mut context)?;
                     }
                     _ => return Err(format!("Unkown Key: {}", id)),
                 }
             }
         }
-        let scene: Scene = self.parse_scene()?;
-        Ok(scene.expressions.generate_shader(&scene.args)?)
+        let scene: Scene = self.parse_scene(&mut context)?;
+        scene.expressions.generate_shader(&scene.args)
     }
 }
 

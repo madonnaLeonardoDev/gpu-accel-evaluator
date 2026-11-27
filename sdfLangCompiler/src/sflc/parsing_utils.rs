@@ -75,7 +75,7 @@ impl SdflParser {
         self.advance();
         self.advance().expect(&SdflTokens::Equals)?;
         let expr = self.parse_math_expr(&SdflTokens::SemiColon, context, None)?;
-        let res = expr.resolve_compiletime(context, &self)?;
+        let res = expr.resolve_compiletime(context, self)?;
 
         context.consts.insert(id, res);
         Ok(())
@@ -85,6 +85,7 @@ impl SdflParser {
         &mut self,
         context: &Context,
         shape: &Shape,
+        vars: Option<&HashSet<String>>,
     ) -> Result<Expression, String> {
         self.advance().expect(&OpenPar)?;
         let mut shape_args: HashMap<String, Expression> = HashMap::new();
@@ -97,30 +98,76 @@ impl SdflParser {
             } else {
                 Comma
             };
-            let expr_res = self.parse_math_expr(&end_tok, context, None)?;
+            let expr_res = self.parse_math_expr(&end_tok, context, vars)?;
             shape_args.insert(arg_name.clone(), expr_res);
         }
         let mut to_res_expr = shape.expression.clone();
         to_res_expr.insert_expressions(&shape_args)?;
-        Ok(shape.expression.clone())
+        self.advance();
+        Ok(to_res_expr)
     }
 
-    pub fn parse_identif(&mut self, context: &Context, id: &str) -> Result<Expression, String> {
+    pub fn parse_identif(
+        &mut self,
+        context: &Context,
+        vars: Option<&HashSet<String>>,
+        id: &str,
+    ) -> Result<Expression, String> {
         if let Some(num) = context.consts.get(id) {
             return Ok(Expression::Number(*num));
         }
         if let Some(shape) = context.shapes.get(id) {
-            let res = self.parse_shape_to_expr(context, shape)?;
+            let res = self.parse_shape_to_expr(context, shape, vars)?;
             return Ok(res);
+        }
+        if let Some(v) = vars
+            && v.contains(id)
+        {
+            return Ok(Expression::Variable(id.to_string()));
         }
         Err(format!(
             "Identifier {} doesnt match any previous statements",
             id
         ))
     }
-    pub fn parse_scene(&mut self) -> Result<Scene, String> {
-        //TODO: Parsing scene
-        Ok(())
+    pub fn parse_scene(&mut self, context: &mut Context) -> Result<Scene, String> {
+        if let Identifier(id) = self.peek()
+            && id == "scene"
+        {
+            self.advance();
+            self.advance().expect(&OpenPar)?;
+            let mut args: Vec<String> = Vec::new();
+            let mut vars_map: HashSet<String> = HashSet::new();
+            let mut i: usize = 0;
+            while !matches!(self.peek(), &ClosedPar) {
+                if i > 0 {
+                    self.advance().expect(&Comma)?;
+                }
+                if let Identifier(id) = self.advance() {
+                    if !vars_map.insert(id.to_string()) {
+                        return Err(format!("Duplicate argument declared in shape: {}", id));
+                    }
+                    args.push(id.clone());
+                } else {
+                    return Err(format!("Expected Identifier found: {:?}", self.peek()));
+                }
+                i += 1;
+            }
+            let mut exprs: Vec<Expression> = Vec::new();
+            self.advance().expect(&ClosedPar)?;
+            self.advance().expect(&OpenBracket)?;
+            while !matches!(self.peek(), ClosedBracket) {
+                let expr = self.parse_math_expr(&SemiColon, context, Some(&vars_map))?;
+                exprs.push(expr);
+                self.advance().expect(&SemiColon)?;
+            }
+            return Ok(Scene {
+                expressions: exprs,
+                args,
+            });
+        }
+
+        Err(format!("Expected Identifier found: {:?}", self.peek()))
     }
 }
 
@@ -164,9 +211,9 @@ impl Expression {
                 | FunctionOperations::SmoothMax(a, b, c)
                 | FunctionOperations::Mix(a, b, c)
                 | FunctionOperations::Clamp(a, b, c) => {
-                    a.insert_expressions(inserts);
-                    b.insert_expressions(inserts);
-                    c.insert_expressions(inserts);
+                    a.insert_expressions(inserts)?;
+                    b.insert_expressions(inserts)?;
+                    c.insert_expressions(inserts)?;
                 }
             },
 

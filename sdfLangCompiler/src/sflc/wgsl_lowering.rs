@@ -10,11 +10,11 @@ fn format_wgsl_f32(n: f32) -> String {
     }
 }
 pub trait GenerateShader {
-    fn generate_shader(&self, vars: &Vec<String>) -> Result<String, String>;
+    fn generate_shader(&self, vars: &[String]) -> Result<String, String>;
 }
 
 impl GenerateShader for Vec<Expression> {
-    fn generate_shader(&self, vars: &Vec<String>) -> Result<String, String> {
+    fn generate_shader(&self, vars: &[String]) -> Result<String, String> {
         if self.is_empty() {
             return Err("Empty Expression vec".to_string());
         }
@@ -42,7 +42,7 @@ impl GenerateShader for Vec<Expression> {
 }
 
 impl Expression {
-    pub fn map_wgsl_math(&self, vars: &Vec<String>) -> Result<String, String> {
+    pub fn map_wgsl_math(&self, vars: &[String]) -> Result<String, String> {
         match self {
             Expression::Number(n) => Ok(format_wgsl_f32(*n)),
             Expression::Variable(s) => match s.as_str() {
