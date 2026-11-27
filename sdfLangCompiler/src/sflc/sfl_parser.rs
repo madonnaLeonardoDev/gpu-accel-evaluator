@@ -1,19 +1,34 @@
-use super::expressions::Expression::Variable;
 use super::expressions::{BinaryOperations, Expression, FunctionOperations};
 use super::sfl_lexer::SdflTokens;
+use super::wgsl_lowering::GenerateShader;
+use crate::sflc::sfl_lexer::SdflTokens::Identifier;
 use std::collections::{HashMap, HashSet};
+
+pub struct Scene {
+    pub args: Vec<String>,
+    pub expressions: Vec<Expression>,
+}
 
 #[derive(Debug)]
 pub struct Shape {
     pub args: Vec<String>,
     pub expression: Expression,
 }
-
+pub struct Context {
+    pub consts: HashMap<String, f32>,
+    pub shapes: HashMap<String, Shape>,
+}
+impl Context {
+    pub fn new() -> Self {
+        Self {
+            consts: HashMap::new(),
+            shapes: HashMap::new(),
+        }
+    }
+}
 pub struct SdflParser {
     pub tokens: Vec<SdflTokens>,
     pub pointer: usize,
-    pub shapes: HashMap<String, Shape>,
-    pub consts: HashMap<String, f32>,
 }
 
 //MATH PARSING INTO Expression
@@ -21,9 +36,10 @@ impl SdflParser {
     pub fn parse_math_expr(
         &mut self,
         end_tok: &SdflTokens,
+        context: &Context,
         vars: Option<&HashSet<String>>,
     ) -> Result<Expression, String> {
-        let expr = self.parse_additive(vars)?;
+        let expr = self.parse_additive(context, vars)?;
 
         if std::mem::discriminant(self.peek()) != std::mem::discriminant(end_tok) {
             return Err(format!(
@@ -37,8 +53,12 @@ impl SdflParser {
         Ok(expr)
     }
 
-    fn parse_additive(&mut self, vars: Option<&HashSet<String>>) -> Result<Expression, String> {
-        let mut left = self.parse_multiplication(vars)?;
+    fn parse_additive(
+        &mut self,
+        context: &Context,
+        vars: Option<&HashSet<String>>,
+    ) -> Result<Expression, String> {
+        let mut left = self.parse_multiplication(context, vars)?;
         while matches!(self.peek(), SdflTokens::MathPlus | SdflTokens::MathMinus) {
             let op = match self.advance() {
                 SdflTokens::MathPlus => BinaryOperations::Add,
@@ -46,7 +66,7 @@ impl SdflParser {
                 _ => unreachable!(),
             };
 
-            let right = self.parse_multiplication(vars)?;
+            let right = self.parse_multiplication(context, vars)?;
 
             left = Expression::Binary {
                 left: Box::new(left),
@@ -60,9 +80,10 @@ impl SdflParser {
 
     fn parse_multiplication(
         &mut self,
+        context: &Context,
         vars: Option<&HashSet<String>>,
     ) -> Result<Expression, String> {
-        let mut left = self.parse_power(vars)?;
+        let mut left = self.parse_power(context, vars)?;
 
         while matches!(self.peek(), SdflTokens::MathTimes | SdflTokens::MathDivide) {
             let op = match self.advance() {
@@ -71,7 +92,7 @@ impl SdflParser {
                 _ => unreachable!(),
             };
 
-            let right = self.parse_power(vars)?;
+            let right = self.parse_power(context, vars)?;
 
             left = Expression::Binary {
                 left: Box::new(left),
@@ -83,14 +104,18 @@ impl SdflParser {
         Ok(left)
     }
 
-    fn parse_power(&mut self, vars: Option<&HashSet<String>>) -> Result<Expression, String> {
-        let mut left = self.parse_unary(vars)?;
+    fn parse_power(
+        &mut self,
+        context: &Context,
+        vars: Option<&HashSet<String>>,
+    ) -> Result<Expression, String> {
+        let mut left = self.parse_unary(context, vars)?;
 
         if matches!(self.peek(), SdflTokens::MathPow) {
             self.advance();
             let op = BinaryOperations::Power;
 
-            let right = self.parse_power(vars)?;
+            let right = self.parse_power(context, vars)?;
 
             left = Expression::Binary {
                 left: Box::new(left),
@@ -102,25 +127,33 @@ impl SdflParser {
         Ok(left)
     }
 
-    fn parse_unary(&mut self, vars: Option<&HashSet<String>>) -> Result<Expression, String> {
+    fn parse_unary(
+        &mut self,
+        context: &Context,
+        vars: Option<&HashSet<String>>,
+    ) -> Result<Expression, String> {
         if matches!(self.peek(), SdflTokens::MathMinus) {
             self.advance();
 
-            let expr = self.parse_unary(vars)?;
+            let expr = self.parse_unary(context, vars)?;
 
             let op = FunctionOperations::Minus(Box::new(expr));
 
             return Ok(Expression::Function(op));
         }
 
-        self.parse_primary(vars)
+        self.parse_primary(context, vars)
     }
 
-    fn parse_primary(&mut self, vars: Option<&HashSet<String>>) -> Result<Expression, String> {
+    fn parse_primary(
+        &mut self,
+        context: &Context,
+        vars: Option<&HashSet<String>>,
+    ) -> Result<Expression, String> {
         match self.advance() {
-            SdflTokens::Num(n) => return Ok(Expression::Number(*n)),
+            SdflTokens::Num(n) => Ok(Expression::Number(*n)),
             SdflTokens::OpenPar => {
-                let expr = self.parse_additive(vars)?;
+                let expr = self.parse_additive(context, vars)?;
 
                 if !matches!(self.peek(), SdflTokens::ClosedPar) {
                     return Err("Expected ')'".to_string());
@@ -128,7 +161,7 @@ impl SdflParser {
 
                 self.advance();
 
-                return Ok(expr);
+                Ok(expr)
             }
             SdflTokens::Identifier(name) => {
                 let name = name.clone();
@@ -146,11 +179,11 @@ impl SdflParser {
                     let mut args: Vec<Expression> = Vec::with_capacity(expected_args);
 
                     if !matches!(self.peek(), SdflTokens::ClosedPar) {
-                        args.push(self.parse_additive(vars)?);
+                        args.push(self.parse_additive(context, vars)?);
 
                         while matches!(self.peek(), SdflTokens::Comma) {
                             self.advance();
-                            args.push(self.parse_additive(vars)?);
+                            args.push(self.parse_additive(context, vars)?);
                         }
                     }
 
@@ -209,40 +242,24 @@ impl SdflParser {
 
                     Ok(Expression::Function(op))
                 } else {
-                    if let Some(var) = self.consts.get(&name) {
-                        return Ok(Expression::Number(*var));
-                    }
-                    if let Some(shape) = self.shapes.get(&name) {
-                        //TODO: Calculate shapes
-                        todo!()
-                    }
-                    if let Some(v) = vars {
-                        if v.contains(&name) {
-                            return Ok(Variable(name));
-                        }
-                    }
-                    Err(format!("{} Doesn't match any shapes or constant", name))
+                    Ok(self.parse_identif(context, &name)?)
                 }
             }
             _ => Err(format!("Unexpected token on index: {}", self.pointer)),
         }
     }
 }
-
+//Parser Utils
 impl SdflParser {
     pub fn new(tokens: Vec<SdflTokens>) -> Self {
-        Self {
-            tokens,
-            pointer: 0,
-            shapes: HashMap::new(),
-            consts: HashMap::new(),
-        }
+        Self { tokens, pointer: 0 }
     }
 
     pub fn peek(&self) -> &SdflTokens {
         self.tokens.get(self.pointer).unwrap_or(&SdflTokens::Eof)
     }
 
+    //Constructors parsing
     pub fn advance(&mut self) -> &SdflTokens {
         let tok = self.tokens.get(self.pointer).unwrap_or(&SdflTokens::Eof);
 
@@ -250,6 +267,25 @@ impl SdflParser {
             self.pointer += 1;
         }
         tok
+    }
+
+    pub fn wgsl_parse(&mut self) -> Result<String, String> {
+        let context = Context::new();
+        while self.advance() != &SdflTokens::Identifier("scene".to_string()) {
+            if let Identifier(id) = self.advance() {
+                match id.as_str() {
+                    "const" => {
+                        self.parse_const(&mut context);
+                    }
+                    "shape" => {
+                        self.parse_shape_fn(&mut context);
+                    }
+                    _ => return Err(format!("Unkown Key: {}", id)),
+                }
+            }
+        }
+        let scene: Scene = self.parse_scene()?;
+        Ok(scene.expressions.generate_shader(&scene.args)?)
     }
 }
 
@@ -262,113 +298,3 @@ impl SdflTokens {
         Ok(())
     }
 }
-
-impl Expression {
-    pub fn resolve_compiletime(&self, parser: &SdflParser) -> Result<f32, String> {
-        match self {
-            Self::Number(n) => Ok(*n),
-            Self::Variable(id) => {
-                if let Some(n) = parser.consts.get(id) {
-                    return Ok(*n);
-                }
-                if let Some(shape) = parser.shapes.get(id) {
-                    //TODO: Reslove Shape
-                    return //Placeholder
-                    Ok(3.0);
-                } else {
-                    return Err(format!("{} is not declared", id));
-                }
-            }
-            Self::Binary {
-                left,
-                operator,
-                right,
-            } => match operator {
-                BinaryOperations::Add => {
-                    let left = left.resolve_compiletime(parser)?;
-                    let right = right.resolve_compiletime(parser)?;
-                    return Ok(left + right);
-                }
-                BinaryOperations::Subtract => {
-                    let left = left.resolve_compiletime(parser)?;
-                    let right = right.resolve_compiletime(parser)?;
-                    return Ok(left - right);
-                }
-                BinaryOperations::Multiply => {
-                    let left = left.resolve_compiletime(parser)?;
-                    let right = right.resolve_compiletime(parser)?;
-                    return Ok(left * right);
-                }
-                BinaryOperations::Divide => {
-                    let left = left.resolve_compiletime(parser)?;
-                    let right = right.resolve_compiletime(parser)?;
-                    return Ok(left / right);
-                }
-                BinaryOperations::Power => {
-                    let left = left.resolve_compiletime(parser)?;
-                    let right = right.resolve_compiletime(parser)?;
-                    return Ok(left.powf(right));
-                }
-            },
-            Self::Function(f) => match f {
-                FunctionOperations::Minus(a) => Ok(a.resolve_compiletime(parser)? * -1.0),
-                FunctionOperations::Absolute(a) => Ok(a.resolve_compiletime(parser)?.abs()),
-                FunctionOperations::Cos(a) => Ok(a.resolve_compiletime(parser)?.cos()),
-                FunctionOperations::Sin(a) => Ok(a.resolve_compiletime(parser)?.sin()),
-                FunctionOperations::Tan(a) => Ok(a.resolve_compiletime(parser)?.tan()),
-                FunctionOperations::Ln(a) => Ok(a.resolve_compiletime(parser)?.ln()),
-                FunctionOperations::Log2(a) => Ok(a.resolve_compiletime(parser)?.log2()),
-                FunctionOperations::SquareRoot(a) => Ok(a.resolve_compiletime(parser)?.sqrt()),
-                FunctionOperations::Mod(a, b) => Ok(sdf_mod(
-                    a.resolve_compiletime(parser)?,
-                    b.resolve_compiletime(parser)?,
-                )),
-                FunctionOperations::SmoothMin(a, b, c) => Ok(smoothmin(
-                    a.resolve_compiletime(parser)?,
-                    b.resolve_compiletime(parser)?,
-                    c.resolve_compiletime(parser)?,
-                )),
-                FunctionOperations::SmoothMax(a, b, c) => Ok(smoothmax(
-                    a.resolve_compiletime(parser)?,
-                    b.resolve_compiletime(parser)?,
-                    c.resolve_compiletime(parser)?,
-                )),
-                FunctionOperations::Mix(a, b, c) => Ok(mix(
-                    a.resolve_compiletime(parser)?,
-                    b.resolve_compiletime(parser)?,
-                    c.resolve_compiletime(parser)?,
-                )),
-                FunctionOperations::Clamp(a, b, c) => Ok(a.resolve_compiletime(parser)?.clamp(
-                    b.resolve_compiletime(parser)?,
-                    c.resolve_compiletime(parser)?,
-                )),
-            },
-        }
-    }
-}
-
-fn sdf_mod(a: f32, b: f32) -> f32 {
-    a - b * (a / b).floor()
-}
-
-fn mix(a: f32, b: f32, t: f32) -> f32 {
-    a * (1.0 - t) + b * t
-    // or: a + (b - a) * t
-}
-
-fn smoothmin(a: f32, b: f32, k: f32) -> f32 {
-    if k <= 0.0 {
-        return a.min(b);
-    }
-    let h = (0.5 + 0.5 * (b - a) / k).clamp(0.0, 1.0);
-    mix(b, a, h) - k * h * (1.0 - h)
-}
-
-fn smoothmax(a: f32, b: f32, k: f32) -> f32 {
-    if k <= 0.0 {
-        return a.max(b);
-    }
-    let h = (0.5 - 0.5 * (b - a) / k).clamp(0.0, 1.0);
-    mix(b, a, h) + k * h * (1.0 - h)
-}
-//Expression Parsing Impl

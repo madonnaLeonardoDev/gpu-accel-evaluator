@@ -1,13 +1,14 @@
-use crate::sflc::expressions::Expression;
-
 use super::sfl_lexer::SdflTokens::{self, *};
 use super::sfl_parser::{SdflParser, Shape};
-use std::collections::HashSet;
+use crate::sflc::expressions::Expression;
+use crate::sflc::expressions::FunctionOperations;
+use crate::sflc::sfl_parser::{Context, Scene};
+use std::collections::{HashMap, HashSet};
 impl SdflParser {
-    pub fn parse_shape_fn(&mut self) -> Result<(String, Shape), String> {
+    pub fn parse_shape_fn(&mut self, context: &mut Context) -> Result<(), String> {
         let id = match &self.peek() {
             Identifier(id) => {
-                if self.shapes.contains_key(id) {
+                if context.shapes.contains_key(id) {
                     return Err(format!(
                         "Invalid Shape Identifier: {}, there already exists a Shape with this identifier",
                         id
@@ -44,22 +45,24 @@ impl SdflParser {
         }
         self.advance().expect(&ClosedPar)?;
         self.advance().expect(&OpenCurly)?;
-        let expr = self.parse_math_expr(&SdflTokens::ClosedCurly, Some(&vars_map))?;
+        let expr = self.parse_math_expr(&SdflTokens::ClosedCurly, context, Some(&vars_map))?;
         self.advance().expect(&ClosedCurly)?;
 
-        Ok((
+        context.shapes.insert(
             id,
             Shape {
                 args: vars,
                 expression: expr,
             },
-        ))
+        );
+
+        Ok(())
     }
 
-    pub fn parse_var(&mut self) -> Result<(String, f32), String> {
+    pub fn parse_const(&mut self, context: &mut Context) -> Result<(), String> {
         let id = match self.peek() {
             Identifier(id) => {
-                if self.consts.contains_key(id) {
+                if context.consts.contains_key(id) {
                     return Err(format!(
                         "Invalid var Identifier: {}, there already exists a var with this identifier",
                         id
@@ -71,16 +74,105 @@ impl SdflParser {
         };
         self.advance();
         self.advance().expect(&SdflTokens::Equals)?;
-        let expr = self.parse_math_expr(&SdflTokens::SemiColon, None)?;
-        let res = expr.resolve_compiletime(&self)?;
+        let expr = self.parse_math_expr(&SdflTokens::SemiColon, context, None)?;
+        let res = expr.resolve_compiletime(context, &self)?;
 
-        Ok((id, res))
+        context.consts.insert(id, res);
+        Ok(())
     }
 
-    pub fn resolve_shape(&mut self) -> Result<Expression, String> {
-        match self.peek() {
-            Identifier(id) => {}
-            _ => Err(format!("Expected Identifier found {:?}", self.peek())),
+    fn parse_shape_to_expr(
+        &mut self,
+        context: &Context,
+        shape: &Shape,
+    ) -> Result<Expression, String> {
+        self.advance().expect(&OpenPar)?;
+        let mut shape_args: HashMap<String, Expression> = HashMap::new();
+        for (i, arg_name) in shape.args.iter().enumerate() {
+            if i > 0 {
+                self.advance().expect(&Comma)?;
+            }
+            let end_tok = if i == shape.args.len() - 1 {
+                ClosedPar
+            } else {
+                Comma
+            };
+            let expr_res = self.parse_math_expr(&end_tok, context, None)?;
+            shape_args.insert(arg_name.clone(), expr_res);
         }
+        let mut to_res_expr = shape.expression.clone();
+        to_res_expr.insert_expressions(&shape_args)?;
+        Ok(shape.expression.clone())
+    }
+
+    pub fn parse_identif(&mut self, context: &Context, id: &str) -> Result<Expression, String> {
+        if let Some(num) = context.consts.get(id) {
+            return Ok(Expression::Number(*num));
+        }
+        if let Some(shape) = context.shapes.get(id) {
+            let res = self.parse_shape_to_expr(context, shape)?;
+            return Ok(res);
+        }
+        Err(format!(
+            "Identifier {} doesnt match any previous statements",
+            id
+        ))
+    }
+    pub fn parse_scene(&mut self) -> Result<Scene, String> {
+        //TODO: Parsing scene
+        Ok(())
+    }
+}
+
+impl Expression {
+    fn replace(&mut self, new_expr: Expression) {
+        *self = new_expr;
+    }
+    pub fn insert_expressions(
+        &mut self,
+        inserts: &HashMap<String, Expression>,
+    ) -> Result<(), String> {
+        match self {
+            Self::Variable(id) => match inserts.get(id) {
+                None => return Err(format!("No value matches {}", id)),
+                Some(expr) => {
+                    self.replace(expr.clone());
+                }
+            },
+            Self::Binary {
+                left,
+                operator: _,
+                right,
+            } => {
+                left.insert_expressions(inserts)?;
+                right.insert_expressions(inserts)?;
+            }
+            Self::Function(f) => match f {
+                FunctionOperations::Minus(a)
+                | FunctionOperations::Absolute(a)
+                | FunctionOperations::Cos(a)
+                | FunctionOperations::Sin(a)
+                | FunctionOperations::Tan(a)
+                | FunctionOperations::Ln(a)
+                | FunctionOperations::Log2(a)
+                | FunctionOperations::SquareRoot(a) => a.insert_expressions(inserts)?,
+                FunctionOperations::Mod(a, b) => {
+                    a.insert_expressions(inserts)?;
+                    b.insert_expressions(inserts)?;
+                }
+                FunctionOperations::SmoothMin(a, b, c)
+                | FunctionOperations::SmoothMax(a, b, c)
+                | FunctionOperations::Mix(a, b, c)
+                | FunctionOperations::Clamp(a, b, c) => {
+                    a.insert_expressions(inserts);
+                    b.insert_expressions(inserts);
+                    c.insert_expressions(inserts);
+                }
+            },
+
+            _ => {}
+        }
+
+        Ok(())
     }
 }
